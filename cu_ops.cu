@@ -15,21 +15,31 @@ __global__
 void sum_kernel(int n, float x[], float result[]) {
     __shared__ float partial_sum[SIZE * sizeof(float)];
 
-    int thread_idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (thread_idx < n) {
-        partial_sum[threadIdx.x] = x[thread_idx];
+    int global_idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (global_idx < n) {
+        // load shared memory
+        partial_sum[threadIdx.x] = x[global_idx];
     }
     __syncthreads();
 
-    // this is naive as it leaves a lot of threads inactive after the first iteration
+
     for (int stride = 1; stride < blockDim.x; stride*=2) {
-        int index = threadIdx.x * stride * 2;
-        if (index < blockDim.x) {
-            partial_sum[index] += partial_sum[index] + partial_sum[index + stride];
+
+        int shmem_index = threadIdx.x * stride * 2;
+        int input_index = shmem_index + blockDim.x * blockIdx.x;
+
+        // check bounds of shared memory and bournds of input!
+        bool is_in_bounds = (shmem_index < blockDim.x) 
+                            & (shmem_index + stride < blockDim.x)
+                            & (input_index < n)
+                            & (input_index + stride < n);
+
+        if (is_in_bounds) {
+            partial_sum[shmem_index] += partial_sum[shmem_index + stride];
         }
         __syncthreads();
     }
-
+    
     // each thread block is responsible for computing one partial sum
     // so we store the result according to block index. 
     if (threadIdx.x == 0) { 
@@ -59,7 +69,7 @@ std::vector<float> mult(std::vector<float> x, float scalar) {
 
     int n_inputs = (int)x.size();
 
-    int n_threads = 256;
+    int n_threads = SIZE;
     int n_blocks = (n_inputs + n_threads) / n_threads;
     size_t bytes = n_inputs * sizeof(float);
 
@@ -93,7 +103,7 @@ std::vector<float> mult(std::vector<float> x1, std::vector<float> x2) {
     assert (x1.size() == x2.size());
     int n_inputs = (int)x1.size();
 
-    int n_threads = 256;
+    int n_threads = SIZE;
     int n_blocks = (n_inputs + n_threads) / n_threads;
     size_t bytes = n_inputs * sizeof(float);
 
@@ -123,31 +133,34 @@ __host__
 float sum(std::vector<float> x) {
 
     int block_size = SIZE;
-    int grid_size = (x.size() + block_size) / block_size;
+    size_t grid_size = (x.size() + block_size) / block_size;
 
-    // Probably inefficient to allocate new memory and copy inputs, but this is a workaround 
-    // for the fact that sum reductions are computed based on thread block size, which may 
-    // not be divisible by the number of input elements. 
-    int remainder = x.size() % block_size; 
-    int padded_size = x.size() + remainder;
-    float *h_inputs = (float*) calloc(padded_size, sizeof(float));
+    float *h_result = (float*) malloc(sizeof(float));
 
+    //device side stuff;
     float *d_inputs; 
     float *d_sums;
     cudaMalloc(&d_sums, grid_size * sizeof(float));
-    cudaMalloc(&d_inputs, padded_size * sizeof(float));
+    cudaMalloc(&d_inputs, x.size() * sizeof(float));
+    cudaMemcpy(d_inputs, x.data(), x.size() * sizeof(float), cudaMemcpyHostToDevice);
+    printLastCudaError();
 
-    cudaMemcpy(d_inputs, h_inputs, padded_size * sizeof(float), cudaMemcpyHostToDevice);
+    // launch kernel 2x for complete reduction
+    sum_kernel<<<grid_size, block_size>>>(x.size(), d_inputs, d_sums);
+    printLastCudaError();
 
-    sum_kernel<<<grid_size, block_size>>>(padded_size, d_inputs, d_sums);
-    sum_kernel<<<1, block_size>>>(block_size, d_sums, d_sums); 
+    sum_kernel<<<1, block_size>>>(grid_size, d_sums, d_sums);
+    printLastCudaError(); 
+
+    cudaMemcpy(h_result, d_sums, sizeof(float), cudaMemcpyDeviceToHost);
+    printLastCudaError();
 
     float result = 0;
-    result += d_sums[0];
+    result += h_result[0];
 
     cudaFree(d_sums);
     cudaFree(d_inputs);
-    free(h_inputs);
+    free(h_result);
 
     return result;
 }

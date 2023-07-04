@@ -37,4 +37,8 @@ int main() {
     float area2 = integrate_cuda_cpu(N, y.data(), dx.data());
     std::cout << "GPU: The area is " << area2 << "\n" << std::endl;
 
+    std::vector<float> t(1, 1.0);
+    float s = sum(t);
+    std::cout << "The sum is " << s << std::endl;
+
 }

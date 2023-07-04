@@ -1,6 +1,7 @@
 #include <vector>
 #include <iostream>
 #include "cu_integrate.cuh"
+#include "cu_ops.cuh"
 
 
 __host__
@@ -65,15 +66,19 @@ float integrate_cuda_cpu(int n_sections, float f[], float delta_x[]) {
 
     // copy data from gpu memory over to host (cpu) and free gpu memory
     cudaMemcpy(cpu_results, gpu_results, result_bytes, cudaMemcpyDeviceToHost);
-    cudaFree(gpu_results);
 
     // do summation of section areas on the cpu
-    float sum = 0;
-    for (int i = 0; i < n_sections; i++){
-        sum += cpu_results[i];
-    }
+    float *partial_sums;
+    cudaMalloc(&partial_sums, num_blocks * sizeof(float));
+    sum_kernel<<<num_blocks, num_threads>>>(n_sections, gpu_results, partial_sums);
+    sum_kernel<<<1, num_threads>>>(num_blocks, partial_sums, partial_sums);
 
+    float area = 0.0f;
+    cudaMemcpy(&area, partial_sums, sizeof(float), cudaMemcpyDeviceToHost);
+
+    cudaFree(partial_sums);
+    cudaFree(gpu_results);
     free(cpu_results);
-    return sum;
+    return area;
 }
 
