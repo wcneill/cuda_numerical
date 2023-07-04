@@ -24,15 +24,14 @@ void area_calc_kernel(int sections, float f[], float dx[], float result[]) {
 
 
 /**
- * @brief Performs integration by computing individual trapezoid areas in parallel on GPU, but does sum 
- * reduction on the CPU. 
+ * @brief Computes the area under a sampled curve.
  * 
- * @param n_samples number of function samples. 
- * @param f         function values sampled on a uniform grid
- * @param delta_x:  The spacing between samples. 
+ * @param n_sections The number of sections the function is divided into. Equal to #samples minus one. 
+ * @param f function values sampled on a uniform grid
+ * @param delta_x The spacing between samples. 
 */
 __host__ 
-float integrate_cuda_cpu(int n_sections, float f[], float delta_x[]) {
+float integrate_cuda(int n_sections, float f[], float delta_x[]) {
 
     int n_samples = n_sections + 1;
 
